@@ -1,9 +1,45 @@
 import { create } from 'zustand';
-import type { AppState, ToastType, AudioSettings, SessionRecord } from '@/types';
+import type { AppState, ToastType, AudioSettings, SessionRecord, TranslationResult } from '@/types';
 import { generateId } from '@/utils/helpers';
 import { DEFAULT_AUDIO_SETTINGS, TOAST_DURATION } from '@/utils/constants';
 
 const STORAGE_KEY = 'subtitle-translator-session-records';
+const TRANSLATION_STORAGE_KEY = 'subtitle-translator-translation-history';
+
+interface PersistedTranslationHistory {
+  history: TranslationResult[];
+  pinnedIds: string[];
+}
+
+const loadTranslationHistory = (): PersistedTranslationHistory => {
+  try {
+    const stored = localStorage.getItem(TRANSLATION_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored) as Partial<PersistedTranslationHistory>;
+      return {
+        history: (parsed.history || []).map(r => ({
+          ...r,
+          timestamp: new Date(r.timestamp),
+        })),
+        pinnedIds: Array.isArray(parsed.pinnedIds) ? parsed.pinnedIds : [],
+      };
+    }
+  } catch {
+    console.error('Failed to load translation history from storage');
+  }
+  return { history: [], pinnedIds: [] };
+};
+
+const saveTranslationHistory = (history: TranslationResult[], pinnedIds: string[]) => {
+  try {
+    const payload: PersistedTranslationHistory = { history, pinnedIds };
+    localStorage.setItem(TRANSLATION_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    console.error('Failed to save translation history to storage');
+  }
+};
+
+const initialTranslations = loadTranslationHistory();
 
 const loadRecordsFromStorage = (): SessionRecord[] => {
   try {
@@ -43,7 +79,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   
   // 翻译状态
   inputText: '',
-  translationHistory: [],
+  translationHistory: initialTranslations.history,
+  pinnedTranslationIds: initialTranslations.pinnedIds,
   isTranslating: false,
   
   // Toast状态
@@ -122,8 +159,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       await new Promise(resolve => setTimeout(resolve, 800));
       const result = `[Translated] ${inputText}`;
       
-      set(state => ({
-        translationHistory: [
+      set(state => {
+        const history = [
           {
             id: generateId(),
             sourceText: inputText,
@@ -133,10 +170,14 @@ export const useAppStore = create<AppState>((set, get) => ({
             timestamp: new Date(),
           },
           ...state.translationHistory,
-        ],
-        inputText: '',
-        isTranslating: false,
-      }));
+        ];
+        saveTranslationHistory(history, state.pinnedTranslationIds);
+        return {
+          translationHistory: history,
+          inputText: '',
+          isTranslating: false,
+        };
+      });
       
       addSessionRecord({
         type: 'manual',
@@ -153,6 +194,31 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
   
+  addTranslation: (record) => {
+    set(state => {
+      const newRecord: TranslationResult = {
+        id: generateId(),
+        timestamp: new Date(),
+        ...record,
+      };
+      const history = [newRecord, ...state.translationHistory];
+      saveTranslationHistory(history, state.pinnedTranslationIds);
+      return { translationHistory: history };
+    });
+  },
+
+  togglePinTranslation: (id: string) => {
+    set(state => {
+      const isPinned = state.pinnedTranslationIds.includes(id);
+      // 置顶的记录按置顶时间从新到旧排在最前，再次点击则取消置顶
+      const pinnedIds = isPinned
+        ? state.pinnedTranslationIds.filter(pinnedId => pinnedId !== id)
+        : [id, ...state.pinnedTranslationIds];
+      saveTranslationHistory(state.translationHistory, pinnedIds);
+      return { pinnedTranslationIds: pinnedIds };
+    });
+  },
+
   addToast: (type: ToastType, message: string) => {
     const id = generateId();
     set(state => ({

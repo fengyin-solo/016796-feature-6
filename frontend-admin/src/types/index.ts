@@ -84,6 +84,7 @@ export interface AppState {
   // 翻译
   inputText: string;
   translationHistory: TranslationResult[];
+  pinnedTranslationIds: string[];
   isTranslating: boolean;
   
   // Toast
@@ -101,6 +102,8 @@ export interface AppState {
   setCurrentSubtitle: (text: string) => void;
   setInputText: (text: string) => void;
   translate: () => Promise<void>;
+  addTranslation: (record: Omit<TranslationResult, 'id' | 'timestamp'>) => void;
+  togglePinTranslation: (id: string) => void;
   addToast: (type: ToastType, message: string) => void;
   removeToast: (id: string) => void;
   addSessionRecord: (record: Omit<SessionRecord, 'id' | 'timestamp'>) => void;
